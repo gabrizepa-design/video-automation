@@ -1,3 +1,4 @@
+import React from "react";
 import { Composition } from "remotion";
 import { VideoComposition } from "./Video";
 import type { VideoConfig } from "./types";
@@ -18,8 +19,8 @@ export const RemotionRoot: React.FC = () => {
   return (
     <Composition
       id="VideoShort"
-      component={VideoComposition}
-      durationInFrames={60 * 30} // 60s × 30fps = 1800 frames
+      component={VideoComposition as any}
+      durationInFrames={60 * 30}
       fps={30}
       width={1080}
       height={1920}

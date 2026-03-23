@@ -40,7 +40,8 @@ export const SubtitlesOverlay: React.FC<SubtitlesProps> = ({ subtitles }) => {
           alignItems: "center",
           gap: 8,
           maxWidth: "90%",
-          paddingHorizontal: 20,
+          paddingLeft: 20,
+          paddingRight: 20,
         }}
       >
         {visibleWords.map((word, i) => {
