@@ -37,10 +37,10 @@ ENV REMOTION_CHROME_EXECUTABLE=/usr/bin/chromium
 
 WORKDIR /app
 
-COPY package*.json ./
+COPY remotion-project/package*.json ./
 RUN npm ci
 
-COPY . .
+COPY remotion-project/ .
 
 # Build TypeScript
 RUN npm run build
