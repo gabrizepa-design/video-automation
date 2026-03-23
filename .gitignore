@@ -1,0 +1,43 @@
+# Secrets — NUNCA commitear
+.env
+*.env.local
+
+# Videos temporales
+temp_videos/scenes/*
+temp_videos/audio/*
+temp_videos/subtitles/*
+temp_videos/final/*
+!temp_videos/**/.gitkeep
+
+# Base de datos
+postgres_data/*
+!postgres_data/.gitkeep
+
+# n8n (excepto workflows)
+n8n_data/*
+!n8n_data/workflows/
+!n8n_data/.gitkeep
+
+# Node
+node_modules/
+npm-debug.log*
+
+# Builds
+dist/
+build/
+remotion-project/dist/
+
+# Media
+*.mp4
+*.mp3
+*.wav
+*.webm
+*.mov
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+*.swp

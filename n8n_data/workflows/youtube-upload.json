@@ -1,0 +1,105 @@
+{
+  "name": "Video Automation — YouTube Upload",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "youtube-upload",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "node_webhook_youtube",
+      "name": "Webhook — YouTube Upload",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "resource": "file",
+        "operation": "download",
+        "fileId": "={{ $json.body.driveFileId }}"
+      },
+      "id": "node_gdrive_download",
+      "name": "Google Drive — Download Video",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [460, 300],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "name": "Google Drive OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// Build YouTube video metadata\nconst driveFileId = $('Webhook — YouTube Upload').first().json.body.driveFileId;\nconst filename = $input.first().binary?.data?.fileName || 'video.mp4';\n\n// Extract title from filename (remove timestamp)\nconst titleRaw = filename.replace(/_\\d+\\.mp4$/, '').replace(/_/g, ' ');\nconst title = titleRaw.length > 100 ? titleRaw.substring(0, 97) + '...' : titleRaw;\n\nconst description = `Video generado automáticamente.\\n\\n#Shorts #YouTube`;\n\nreturn [{\n  json: {\n    title,\n    description,\n    tags: ['Shorts', 'YouTube', 'Viral'],\n    categoryId: '22',  // People & Blogs\n    privacyStatus: 'public',\n    driveFileId\n  }\n}];"
+      },
+      "id": "node_build_metadata",
+      "name": "Build YouTube Metadata",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "title": "={{ $json.title }}",
+        "categoryId": "={{ $json.categoryId }}",
+        "options": {
+          "description": "={{ $json.description }}",
+          "privacyStatus": "={{ $json.privacyStatus }}",
+          "tags": "={{ $json.tags }}"
+        }
+      },
+      "id": "node_youtube_upload",
+      "name": "YouTube — Upload Video",
+      "type": "n8n-nodes-base.youtube",
+      "typeVersion": 1,
+      "position": [900, 300],
+      "credentials": {
+        "youTubeOAuth2Api": {
+          "name": "YouTube OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "=🚀 *Video publicado en YouTube!*\n\n*Título:* {{ $json.snippet.title }}\n*URL:* https://youtube.com/shorts/{{ $json.id }}\n\n✅ Todo listo!",
+        "additionalFields": {
+          "parse_mode": "Markdown",
+          "disable_web_page_preview": false
+        }
+      },
+      "id": "node_telegram_success",
+      "name": "Telegram — Notify Success",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [1120, 300],
+      "credentials": {
+        "telegramApi": {
+          "name": "Telegram Bot"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook — YouTube Upload": {
+      "main": [[{ "node": "Google Drive — Download Video", "type": "main", "index": 0 }]]
+    },
+    "Google Drive — Download Video": {
+      "main": [[{ "node": "Build YouTube Metadata", "type": "main", "index": 0 }]]
+    },
+    "Build YouTube Metadata": {
+      "main": [[{ "node": "YouTube — Upload Video", "type": "main", "index": 0 }]]
+    },
+    "YouTube — Upload Video": {
+      "main": [[{ "node": "Telegram — Notify Success", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": ["video-automation"]
+}

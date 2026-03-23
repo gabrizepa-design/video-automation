@@ -1,0 +1,463 @@
+{
+  "name": "Video Automation — Main Pipeline",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "new-script",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "node_webhook_trigger",
+      "name": "Webhook — New Script",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Validate payload and select best idea\nconst body = $input.first().json;\n\nif (!body.ideas || body.ideas.length === 0) {\n  throw new Error('No ideas in payload: ' + JSON.stringify(body));\n}\n\n// Always take the first idea (can be changed to let user pick later)\nconst idea = body.ideas[0];\n\nif (!idea.scenes || idea.scenes.length === 0) {\n  throw new Error('Idea has no scenes: ' + idea.title);\n}\n\nconst timestamp = Date.now();\n\nreturn [{\n  json: {\n    ...idea,\n    sourceFile: body.sourceFile,\n    preset: body.preset,\n    keywords: body.keywords,\n    timestamp,\n    jobId: `job_${timestamp}`,\n    allIdeas: body.ideas\n  }\n}];"
+      },
+      "id": "node_validate_idea",
+      "name": "Validate & Select Idea",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "anthropic-version", "value": "2023-06-01" },
+            { "name": "content-type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "model",
+              "value": "claude-sonnet-4-6"
+            },
+            {
+              "name": "max_tokens",
+              "value": "2048"
+            },
+            {
+              "name": "system",
+              "value": "You are a video production assistant. Analyze the provided scenes and return a JSON array with your analysis. Return ONLY valid JSON, no markdown, no explanation."
+            },
+            {
+              "name": "messages",
+              "value": "={{ JSON.stringify([{role: 'user', content: 'Analyze these video scenes and for each one, decide if it needs AI video generation (Runway) or can use a static image. Also suggest the transition type (fade/dissolve/wipe/cut) after each scene.\\n\\nScenes:\\n' + JSON.stringify($json.scenes, null, 2) + '\\n\\nReturn JSON array: [{\"scene_index\": 0, \"needs_animation\": true/false, \"optimized_prompt\": \"...\", \"transition\": \"fade/dissolve/wipe/cut\"}]'}]) }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "node_claude_analysis",
+      "name": "Claude — Analyze Scenes",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [680, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Anthropic API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// Merge Claude's scene analysis back into the idea data\nconst claudeResponse = $input.first().json;\nconst idea = $('Validate & Select Idea').first().json;\n\nlet analysis;\ntry {\n  const content = claudeResponse.content[0].text;\n  analysis = JSON.parse(content);\n} catch (e) {\n  // Fallback: animate all scenes\n  analysis = idea.scenes.map((_, i) => ({\n    scene_index: i,\n    needs_animation: true,\n    optimized_prompt: idea.scenes[i].visual,\n    transition: 'fade'\n  }));\n}\n\nconst enrichedScenes = idea.scenes.map((scene, i) => {\n  const sceneAnalysis = analysis.find(a => a.scene_index === i) || {};\n  return {\n    ...scene,\n    id: i,\n    needs_animation: sceneAnalysis.needs_animation !== false,\n    runwayPrompt: sceneAnalysis.optimized_prompt || scene.visual,\n    transition: sceneAnalysis.transition || 'fade'\n  };\n});\n\nreturn [{\n  json: {\n    ...idea,\n    scenes: enrichedScenes,\n    scenesToGenerate: enrichedScenes.filter(s => s.needs_animation)\n  }\n}];"
+      },
+      "id": "node_merge_analysis",
+      "name": "Merge Claude Analysis",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "node_split_scenes",
+      "name": "Split Scenes",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 2,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://api.runwayml.com/v1/image_to_video",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "model", "value": "gen3a_turbo" },
+            { "name": "promptText", "value": "={{ $json.runwayPrompt }}" },
+            { "name": "duration", "value": "={{ $json.duration <= 5 ? 5 : 10 }}" },
+            { "name": "ratio", "value": "720:1280" }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "node_runway_generate",
+      "name": "Runway — Generate Scene",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1340, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Runway API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// Store task_id and scene data for polling\nconst runwayResponse = $input.first().json;\nconst sceneData = $('Split Scenes').first().json;\n\nreturn [{\n  json: {\n    taskId: runwayResponse.id,\n    scene: sceneData,\n    pollAttempts: 0\n  }\n}];"
+      },
+      "id": "node_store_task",
+      "name": "Store Task ID",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1560, 300]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.runwayml.com/v1/tasks/{{ $json.taskId }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "node_runway_poll",
+      "name": "Runway — Poll Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1780, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Runway API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.status }}",
+              "operation": "equal",
+              "value2": "SUCCEEDED"
+            }
+          ]
+        }
+      },
+      "id": "node_check_status",
+      "name": "Task Complete?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [2000, 300]
+    },
+    {
+      "parameters": {
+        "amount": 15,
+        "unit": "seconds"
+      },
+      "id": "node_wait_runway",
+      "name": "Wait 15s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "position": [2000, 480]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.output[0] }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "node_download_scene",
+      "name": "Download Scene Video",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [2220, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Save binary video to shared volume path\nconst fs = require('fs');\nconst scene = $('Store Task ID').first().json.scene;\nconst timestamp = $('Validate & Select Idea').first().json.timestamp;\nconst tempDir = process.env.TEMP_VIDEOS_DIR || '/tmp/videos';\n\nconst scenePath = `${tempDir}/scenes/scene_${scene.id}_${timestamp}.mp4`;\n\n// Write binary data\nconst binary = $input.first().binary;\nif (binary && binary.data) {\n  const buffer = Buffer.from(binary.data.data, 'base64');\n  fs.writeFileSync(scenePath, buffer);\n}\n\nreturn [{\n  json: {\n    ...scene,\n    videoPath: scenePath\n  }\n}];"
+      },
+      "id": "node_save_scene",
+      "name": "Save Scene File",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [2440, 300]
+    },
+    {
+      "parameters": {
+        "mode": "append",
+        "options": {}
+      },
+      "id": "node_merge_scenes",
+      "name": "Collect All Scenes",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2,
+      "position": [2660, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://api.elevenlabs.io/v1/text-to-speech/{{ $env.ELEVENLABS_VOICE_ID }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "text", "value": "={{ $('Validate & Select Idea').first().json.fullNarration }}" },
+            { "name": "model_id", "value": "eleven_multilingual_v2" },
+            { "name": "voice_settings", "value": "={ \"stability\": 0.5, \"similarity_boost\": 0.75 }" }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          },
+          "timeout": 60000
+        }
+      },
+      "id": "node_elevenlabs_tts",
+      "name": "ElevenLabs — TTS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [2880, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "ElevenLabs API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// Save audio binary to shared volume\nconst fs = require('fs');\nconst timestamp = $('Validate & Select Idea').first().json.timestamp;\nconst tempDir = process.env.TEMP_VIDEOS_DIR || '/tmp/videos';\nconst audioPath = `${tempDir}/audio/audio_${timestamp}.mp3`;\n\nconst binary = $input.first().binary;\nif (binary && binary.data) {\n  const buffer = Buffer.from(binary.data.data, 'base64');\n  fs.writeFileSync(audioPath, buffer);\n}\n\nreturn [{ json: { audioPath } }];"
+      },
+      "id": "node_save_audio",
+      "name": "Save Audio File",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [3100, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://api.openai.com/v1/audio/transcriptions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            { "name": "model", "value": "whisper-1" },
+            { "name": "response_format", "value": "verbose_json" },
+            { "name": "timestamp_granularities[]", "value": "word" }
+          ]
+        },
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "node_whisper",
+      "name": "Whisper — Transcribe",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [3320, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// Build VideoConfig JSON for Remotion\nconst fs = require('fs');\nconst idea = $('Validate & Select Idea').first().json;\nconst allScenePaths = $('Collect All Scenes').all().map(item => item.json);\nconst audioPath = $('Save Audio File').first().json.audioPath;\nconst whisperData = $input.first().json;\nconst tempDir = process.env.TEMP_VIDEOS_DIR || '/tmp/videos';\n\n// Build subtitle word list from Whisper\nconst subtitles = (whisperData.words || []).map(w => ({\n  word: w.word.trim(),\n  start: w.start,\n  end: w.end\n}));\n\n// Save subtitles JSON\nconst subsPath = `${tempDir}/subtitles/subs_${idea.timestamp}.json`;\nfs.writeFileSync(subsPath, JSON.stringify(subtitles));\n\n// Build scenes array with actual video paths\nconst scenes = idea.scenes.map((scene, i) => {\n  const sceneFile = allScenePaths.find(s => s.id === i);\n  return {\n    ...scene,\n    videoPath: sceneFile ? sceneFile.videoPath : ''\n  };\n}).filter(s => s.videoPath);\n\nconst outputPath = `${tempDir}/final/video_${idea.timestamp}.mp4`;\n\nconst videoConfig = {\n  title: idea.title,\n  scenes,\n  audioPath,\n  subtitles,\n  outputPath,\n  fps: 30,\n  width: 1080,\n  height: 1920\n};\n\nreturn [{\n  json: {\n    videoConfig,\n    jobId: idea.jobId,\n    title: idea.title,\n    sourceFile: idea.sourceFile,\n    outputPath\n  }\n}];"
+      },
+      "id": "node_build_config",
+      "name": "Build Video Config",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [3540, 300]
+    },
+    {
+      "parameters": {
+        "url": "http://remotion-renderer:3001/render",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.videoConfig) }}",
+        "options": {
+          "timeout": 600000
+        }
+      },
+      "id": "node_remotion_render",
+      "name": "Remotion — Render Video",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [3760, 300]
+    },
+    {
+      "parameters": {
+        "resource": "file",
+        "operation": "upload",
+        "name": "={{ $('Build Video Config').first().json.title + '_' + $('Validate & Select Idea').first().json.timestamp + '.mp4' }}",
+        "parents": ["={{ $env.GDRIVE_PENDING_FOLDER_ID }}"],
+        "binaryData": true,
+        "options": {}
+      },
+      "id": "node_gdrive_upload",
+      "name": "Google Drive — Upload Pending",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [3980, 300],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "name": "Google Drive OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "=🎬 *Nuevo video listo para revisión*\n\n*Título:* {{ $('Build Video Config').first().json.title }}\n*Archivo:* {{ $('Build Video Config').first().json.sourceFile }}\n*Drive ID:* {{ $json.id }}\n\n✅ /aprobar_{{ $json.id }}\n❌ /rechazar_{{ $json.id }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "node_telegram_notify",
+      "name": "Telegram — Notify Gabriel",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [4200, 300],
+      "credentials": {
+        "telegramApi": {
+          "name": "Telegram Bot"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "node_error_trigger",
+      "name": "On Error",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [240, 560]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "=❌ *Error en pipeline de video*\n\n*Error:* {{ $json.error.message }}\n*Workflow:* {{ $json.workflow.name }}\n*Nodo:* {{ $json.execution.lastNodeExecuted }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "node_telegram_error",
+      "name": "Telegram — Error Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [460, 560],
+      "credentials": {
+        "telegramApi": {
+          "name": "Telegram Bot"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook — New Script": {
+      "main": [[{ "node": "Validate & Select Idea", "type": "main", "index": 0 }]]
+    },
+    "Validate & Select Idea": {
+      "main": [[{ "node": "Claude — Analyze Scenes", "type": "main", "index": 0 }]]
+    },
+    "Claude — Analyze Scenes": {
+      "main": [[{ "node": "Merge Claude Analysis", "type": "main", "index": 0 }]]
+    },
+    "Merge Claude Analysis": {
+      "main": [[{ "node": "Split Scenes", "type": "main", "index": 0 }]]
+    },
+    "Split Scenes": {
+      "main": [[{ "node": "Runway — Generate Scene", "type": "main", "index": 0 }]]
+    },
+    "Runway — Generate Scene": {
+      "main": [[{ "node": "Store Task ID", "type": "main", "index": 0 }]]
+    },
+    "Store Task ID": {
+      "main": [[{ "node": "Runway — Poll Status", "type": "main", "index": 0 }]]
+    },
+    "Runway — Poll Status": {
+      "main": [[{ "node": "Task Complete?", "type": "main", "index": 0 }]]
+    },
+    "Task Complete?": {
+      "main": [
+        [{ "node": "Download Scene Video", "type": "main", "index": 0 }],
+        [{ "node": "Wait 15s", "type": "main", "index": 0 }]
+      ]
+    },
+    "Wait 15s": {
+      "main": [[{ "node": "Runway — Poll Status", "type": "main", "index": 0 }]]
+    },
+    "Download Scene Video": {
+      "main": [[{ "node": "Save Scene File", "type": "main", "index": 0 }]]
+    },
+    "Save Scene File": {
+      "main": [[{ "node": "Collect All Scenes", "type": "main", "index": 0 }]]
+    },
+    "Collect All Scenes": {
+      "main": [[{ "node": "ElevenLabs — TTS", "type": "main", "index": 0 }]]
+    },
+    "ElevenLabs — TTS": {
+      "main": [[{ "node": "Save Audio File", "type": "main", "index": 0 }]]
+    },
+    "Save Audio File": {
+      "main": [[{ "node": "Whisper — Transcribe", "type": "main", "index": 0 }]]
+    },
+    "Whisper — Transcribe": {
+      "main": [[{ "node": "Build Video Config", "type": "main", "index": 0 }]]
+    },
+    "Build Video Config": {
+      "main": [[{ "node": "Remotion — Render Video", "type": "main", "index": 0 }]]
+    },
+    "Remotion — Render Video": {
+      "main": [[{ "node": "Google Drive — Upload Pending", "type": "main", "index": 0 }]]
+    },
+    "Google Drive — Upload Pending": {
+      "main": [[{ "node": "Telegram — Notify Gabriel", "type": "main", "index": 0 }]]
+    },
+    "On Error": {
+      "main": [[{ "node": "Telegram — Error Alert", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "tags": ["video-automation"],
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}

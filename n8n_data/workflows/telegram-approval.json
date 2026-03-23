@@ -1,0 +1,163 @@
+{
+  "name": "Video Automation — Telegram Approval",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": ["message"],
+        "additionalFields": {}
+      },
+      "id": "node_telegram_trigger",
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1,
+      "position": [240, 300],
+      "credentials": {
+        "telegramApi": {
+          "name": "Telegram Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// Parse /aprobar_DRIVE_ID or /rechazar_DRIVE_ID commands\nconst message = $input.first().json.message;\nconst chatId = message?.chat?.id?.toString();\nconst text = message?.text || '';\n\n// Security: only accept messages from Gabriel's chat\nconst allowedChatId = $env.TELEGRAM_CHAT_ID;\nif (chatId !== allowedChatId) {\n  throw new Error(`Unauthorized chat ID: ${chatId}`);\n}\n\nconst approveMatch = text.match(/^\\/aprobar_(.+)/);\nconst rejectMatch = text.match(/^\\/rechazar_(.+)/);\n\nif (!approveMatch && !rejectMatch) {\n  // Not a video command, ignore\n  return [];\n}\n\nconst action = approveMatch ? 'approve' : 'reject';\nconst driveFileId = (approveMatch || rejectMatch)[1].trim();\n\nreturn [{\n  json: {\n    action,\n    driveFileId,\n    chatId\n  }\n}];"
+      },
+      "id": "node_parse_command",
+      "name": "Parse Command",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.action }}",
+              "operation": "equal",
+              "value2": "approve"
+            }
+          ]
+        }
+      },
+      "id": "node_switch_action",
+      "name": "Approve or Reject?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "resource": "file",
+        "operation": "move",
+        "fileId": "={{ $json.driveFileId }}",
+        "folderId": "={{ $env.GDRIVE_APPROVED_FOLDER_ID }}",
+        "options": {}
+      },
+      "id": "node_move_approved",
+      "name": "Move to Approved",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [900, 180],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "name": "Google Drive OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "http://n8n:5678/webhook/youtube-upload",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ driveFileId: $('Parse Command').first().json.driveFileId }) }}",
+        "options": {}
+      },
+      "id": "node_trigger_youtube",
+      "name": "Trigger YouTube Upload",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1120, 180]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "✅ Video aprobado. Subiendo a YouTube...",
+        "additionalFields": {}
+      },
+      "id": "node_confirm_approve",
+      "name": "Confirm Approved",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [1340, 180],
+      "credentials": {
+        "telegramApi": {
+          "name": "Telegram Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "file",
+        "operation": "move",
+        "fileId": "={{ $json.driveFileId }}",
+        "folderId": "={{ $env.GDRIVE_REJECTED_FOLDER_ID }}",
+        "options": {}
+      },
+      "id": "node_move_rejected",
+      "name": "Move to Rejected",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [900, 420],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "name": "Google Drive OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "❌ Video rechazado y movido a la carpeta Rechazados.",
+        "additionalFields": {}
+      },
+      "id": "node_confirm_reject",
+      "name": "Confirm Rejected",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [1120, 420],
+      "credentials": {
+        "telegramApi": {
+          "name": "Telegram Bot"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": {
+      "main": [[{ "node": "Parse Command", "type": "main", "index": 0 }]]
+    },
+    "Parse Command": {
+      "main": [[{ "node": "Approve or Reject?", "type": "main", "index": 0 }]]
+    },
+    "Approve or Reject?": {
+      "main": [
+        [{ "node": "Move to Approved", "type": "main", "index": 0 }],
+        [{ "node": "Move to Rejected", "type": "main", "index": 0 }]
+      ]
+    },
+    "Move to Approved": {
+      "main": [[{ "node": "Trigger YouTube Upload", "type": "main", "index": 0 }]]
+    },
+    "Trigger YouTube Upload": {
+      "main": [[{ "node": "Confirm Approved", "type": "main", "index": 0 }]]
+    },
+    "Move to Rejected": {
+      "main": [[{ "node": "Confirm Rejected", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": ["video-automation"]
+}

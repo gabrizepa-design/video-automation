@@ -1,0 +1,261 @@
+{
+  "name": "video_main_pipeline",
+  "nodes": [
+    {
+      "id": "webhook-trigger",
+      "name": "Webhook - New Script",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "parameters": {
+        "path": "new-script",
+        "httpMethod": "POST",
+        "responseMode": "responseNode"
+      }
+    },
+    {
+      "id": "parse-script",
+      "name": "Parse Script Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300],
+      "parameters": {
+        "jsCode": "const data = $input.first().json.body || $input.first().json;\n\nif (!data.title || !data.scenes) {\n  throw new Error('Invalid script format: missing title or scenes');\n}\n\nreturn [{\n  json: {\n    scriptId: `script_${Date.now()}`,\n    title: data.title,\n    hook: data.hook || '',\n    totalDuration: data.totalDuration || 55,\n    scenes: data.scenes,\n    narration: data.narration || '',\n    filename: data.filename || 'unknown.md',\n    timestamp: new Date().toISOString()\n  }\n}];"
+      }
+    },
+    {
+      "id": "claude-analysis",
+      "name": "Claude - Analyze Scenes",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {"name": "x-api-key", "value": "={{ $env.ANTHROPIC_API_KEY }}"},
+            {"name": "anthropic-version", "value": "2023-06-01"},
+            {"name": "content-type", "value": "application/json"}
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'claude-opus-4-6', max_tokens: 2048, messages: [{ role: 'user', content: 'Analiza este guion de YouTube Short. Para cada escena determina: 1) si necesita video IA (needsVideo: true/false), 2) el prompt para Runway Gen-3 en inglés (max 512 chars), 3) duración en segundos. Responde SOLO con JSON válido con campo scenes:[{index, needsVideo, runwayPrompt, duration, visual}]. Guion: ' + JSON.stringify($json) }] }) }}"
+      }
+    },
+    {
+      "id": "extract-claude",
+      "name": "Extract Claude Analysis",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 300],
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\nconst content = response.content[0].text;\n\nlet analysis;\ntry {\n  const jsonMatch = content.match(/```json\\n([\\s\\S]*?)\\n```/) || content.match(/(\\{[\\s\\S]*\\})/);\n  analysis = JSON.parse(jsonMatch ? (jsonMatch[1] || jsonMatch[0]) : content);\n} catch(e) {\n  analysis = { scenes: [], error: e.message };\n}\n\nconst scriptData = items[0] ? {} : {};\n\nreturn [{\n  json: {\n    scriptId: $node['Parse Script Data'].json.scriptId,\n    title: $node['Parse Script Data'].json.title,\n    narration: $node['Parse Script Data'].json.narration,\n    scenes: $node['Parse Script Data'].json.scenes,\n    filename: $node['Parse Script Data'].json.filename,\n    claudeAnalysis: analysis,\n    processedAt: new Date().toISOString()\n  }\n}];"
+      }
+    },
+    {
+      "id": "elevenlabs-tts",
+      "name": "ElevenLabs - Generate Voice",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1120, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://api.elevenlabs.io/v1/text-to-speech/' + $env.ELEVENLABS_VOICE_ID }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {"name": "xi-api-key", "value": "={{ $env.ELEVENLABS_API_KEY }}"},
+            {"name": "Content-Type", "value": "application/json"}
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ text: $json.narration, model_id: $env.ELEVENLABS_MODEL_ID || 'eleven_multilingual_v2', voice_settings: { stability: 0.5, similarity_boost: 0.75, style: 0.5, use_speaker_boost: true } }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "whisper-transcribe",
+      "name": "Whisper - Transcribe Audio",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1340, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/audio/transcriptions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {"name": "Authorization", "value": "={{ 'Bearer ' + $env.OPENAI_API_KEY }}"}
+          ]
+        },
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {"name": "file", "value": "={{ $binary.data }}", "parameterType": "formBinaryData"},
+            {"name": "model", "value": "whisper-1"},
+            {"name": "response_format", "value": "verbose_json"},
+            {"name": "timestamp_granularities[]", "value": "word"}
+          ]
+        }
+      }
+    },
+    {
+      "id": "runway-generate",
+      "name": "Runway - Generate Video",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1560, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.dev.runwayml.com/v1/image_to_video",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {"name": "Authorization", "value": "={{ 'Bearer ' + $env.RUNWAY_API_KEY }}"},
+            {"name": "X-Runway-Version", "value": "2024-11-06"},
+            {"name": "Content-Type", "value": "application/json"}
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ promptText: $node['Extract Claude Analysis'].json.claudeAnalysis.scenes[0].runwayPrompt, duration: 10, ratio: '720:1280', model: 'gen3a_turbo' }) }}"
+      }
+    },
+    {
+      "id": "wait-runway",
+      "name": "Wait 30s for Runway",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [1780, 300],
+      "parameters": {
+        "unit": "seconds",
+        "amount": 30
+      }
+    },
+    {
+      "id": "check-runway",
+      "name": "Check Runway Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2000, 300],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'https://api.dev.runwayml.com/v1/tasks/' + $json.id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {"name": "Authorization", "value": "={{ 'Bearer ' + $env.RUNWAY_API_KEY }}"},
+            {"name": "X-Runway-Version", "value": "2024-11-06"}
+          ]
+        }
+      }
+    },
+    {
+      "id": "gdrive-upload",
+      "name": "Google Drive - Upload Video",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [2220, 300],
+      "parameters": {
+        "operation": "upload",
+        "name": "={{ $node['Parse Script Data'].json.filename.replace('.md', '') + '_' + new Date().toISOString().split('T')[0] + '.mp4' }}",
+        "folderId": {
+          "__rl": true,
+          "value": "={{ $env.GDRIVE_PENDING_FOLDER_ID }}",
+          "mode": "id"
+        },
+        "inputDataFieldName": "data",
+        "options": {}
+      },
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "google-oauth",
+          "name": "Google OAuth2"
+        }
+      }
+    },
+    {
+      "id": "telegram-notify",
+      "name": "Telegram - Notify Gabriel",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [2440, 300],
+      "parameters": {
+        "operation": "sendMessage",
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "={{ '🎬 *Nuevo video listo para revisar!*\\n\\n📋 *Título:* ' + $node['Parse Script Data'].json.title + '\\n📁 *Archivo:* ' + $node['Parse Script Data'].json.filename + '\\n\\n✅ Responde con:\\n/aprobar_' + $node['Parse Script Data'].json.scriptId + '\\n❌ O con:\\n/rechazar_' + $node['Parse Script Data'].json.scriptId }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-bot",
+          "name": "Telegram Bot"
+        }
+      }
+    },
+    {
+      "id": "respond-webhook",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [2660, 300],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: 'processing', scriptId: $node['Parse Script Data'].json.scriptId, message: 'Video pipeline started' }) }}"
+      }
+    }
+  ],
+  "connections": {
+    "Webhook - New Script": {
+      "main": [[{"node": "Parse Script Data", "type": "main", "index": 0}]]
+    },
+    "Parse Script Data": {
+      "main": [[{"node": "Claude - Analyze Scenes", "type": "main", "index": 0}]]
+    },
+    "Claude - Analyze Scenes": {
+      "main": [[{"node": "Extract Claude Analysis", "type": "main", "index": 0}]]
+    },
+    "Extract Claude Analysis": {
+      "main": [[{"node": "ElevenLabs - Generate Voice", "type": "main", "index": 0}]]
+    },
+    "ElevenLabs - Generate Voice": {
+      "main": [[{"node": "Whisper - Transcribe Audio", "type": "main", "index": 0}]]
+    },
+    "Whisper - Transcribe Audio": {
+      "main": [[{"node": "Runway - Generate Video", "type": "main", "index": 0}]]
+    },
+    "Runway - Generate Video": {
+      "main": [[{"node": "Wait 30s for Runway", "type": "main", "index": 0}]]
+    },
+    "Wait 30s for Runway": {
+      "main": [[{"node": "Check Runway Status", "type": "main", "index": 0}]]
+    },
+    "Check Runway Status": {
+      "main": [[{"node": "Google Drive - Upload Video", "type": "main", "index": 0}]]
+    },
+    "Google Drive - Upload Video": {
+      "main": [[{"node": "Telegram - Notify Gabriel", "type": "main", "index": 0}]]
+    },
+    "Telegram - Notify Gabriel": {
+      "main": [[{"node": "Respond to Webhook", "type": "main", "index": 0}]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+}

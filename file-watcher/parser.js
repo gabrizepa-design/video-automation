@@ -1,0 +1,213 @@
+/**
+ * parser.js — ViralScout 2.0 Markdown Parser
+ *
+ * Parses the ViralScout .md report format into structured JSON.
+ *
+ * Input format:
+ *   # ViralScout 2.0 — Reporte de Investigación
+ *   **Keywords:** kw1, kw2
+ *   **Preset:** eric
+ *   **Fecha:** 2026-03-22T16:42:34
+ *
+ *   ## 💡 Ideas de Video (N)
+ *   ### Idea 1: Título del Video
+ *   **Hook:** texto...
+ *   **Estructura:** ...
+ *   **Retención estimada:** 72-78%
+ *   **Miniatura:** descripción
+ *   **Guion:**
+ *   ```
+ *   [0-5s] Narración
+ *   VISUAL: Descripción
+ *   ```
+ *
+ * Usage (standalone test):
+ *   node parser.js path/to/file.md
+ */
+
+const fs = require("fs");
+
+// ---------------------------------------------------------------------------
+// Extract header metadata
+// ---------------------------------------------------------------------------
+function extractHeader(content) {
+  const keywords = (content.match(/\*\*Keywords:\*\*\s*(.+)/)?.[1] || "")
+    .split(",")
+    .map((k) => k.trim())
+    .filter(Boolean);
+
+  const preset = content.match(/\*\*Preset:\*\*\s*(.+)/)?.[1]?.trim() || "";
+  const fecha = content.match(/\*\*Fecha:\*\*\s*(.+)/)?.[1]?.trim() || "";
+
+  return { keywords, preset, fecha };
+}
+
+// ---------------------------------------------------------------------------
+// Parse scenes from a script block (the content inside ```)
+// ---------------------------------------------------------------------------
+function parseScenes(scriptContent) {
+  const scenes = [];
+  // Match patterns like [0-5s] or [0s] narration\nVISUAL: description
+  const sceneRegex =
+    /\[(\d+)(?:-(\d+))?s\]\s*([\s\S]+?)(?=\n\[|\n```|$)/g;
+
+  let match;
+  while ((match = sceneRegex.exec(scriptContent)) !== null) {
+    const start = parseInt(match[1], 10);
+    const end = match[2] ? parseInt(match[2], 10) : start + 5;
+    const block = match[3].trim();
+
+    // Split narration from VISUAL line
+    const visualMatch = block.match(/^([\s\S]+?)\nVISUAL:\s*(.+?)$/m);
+    let narration = block;
+    let visual = "";
+
+    if (visualMatch) {
+      narration = visualMatch[1].trim();
+      visual = visualMatch[2].trim();
+    } else {
+      // VISUAL might be missing — use narration as visual description fallback
+      narration = block.replace(/VISUAL:.*$/m, "").trim();
+      const visualLine = block.match(/VISUAL:\s*(.+)/)?.[1]?.trim();
+      visual = visualLine || "";
+    }
+
+    // Clean narration: remove any remaining VISUAL lines
+    narration = narration.replace(/VISUAL:.*$/gm, "").trim();
+
+    if (narration) {
+      scenes.push({
+        start,
+        end,
+        duration: end - start,
+        narration,
+        visual: visual || narration,
+      });
+    }
+  }
+
+  // Sort scenes chronologically
+  scenes.sort((a, b) => a.start - b.start);
+
+  return scenes;
+}
+
+// ---------------------------------------------------------------------------
+// Extract fenced code block content (```)
+// ---------------------------------------------------------------------------
+function extractCodeBlock(text) {
+  const match = text.match(/```[\w]*\n?([\s\S]+?)```/);
+  return match ? match[1] : null;
+}
+
+// ---------------------------------------------------------------------------
+// Parse a single idea block
+// ---------------------------------------------------------------------------
+function parseIdea(ideaBlock, index) {
+  // Title from the ### Idea N: line
+  const titleMatch = ideaBlock.match(/###\s+Idea\s+\d+:\s*(.+)/);
+  const title = titleMatch ? titleMatch[1].trim() : `Idea ${index + 1}`;
+
+  const hook = ideaBlock.match(/\*\*Hook:\*\*\s*(.+)/)?.[1]?.trim() || "";
+  const estructura =
+    ideaBlock.match(/\*\*Estructura:\*\*\s*([\s\S]+?)(?=\*\*Retención|\*\*Miniatura|\*\*Guion)/)?.[1]?.trim() || "";
+  const retentionEstimate =
+    ideaBlock.match(/\*\*Retención estimada:\*\*\s*(.+)/)?.[1]?.trim() || "";
+  const thumbnail =
+    ideaBlock.match(/\*\*Miniatura:\*\*\s*([\s\S]+?)(?=\*\*Guion|```)/)?.[1]?.trim() || "";
+
+  // Extract script from fenced code block after **Guion:**
+  const guionSection = ideaBlock.match(/\*\*Guion:\*\*\s*([\s\S]+)/)?.[1] || "";
+  const scriptContent = extractCodeBlock(guionSection);
+
+  if (!scriptContent) {
+    return null;
+  }
+
+  const scenes = parseScenes(scriptContent);
+
+  if (scenes.length === 0) {
+    return null;
+  }
+
+  // Build full narration text
+  const fullNarration = scenes.map((s) => s.narration).join(" ");
+
+  // Total duration = last scene end time
+  const duration = scenes[scenes.length - 1]?.end || 60;
+
+  return {
+    title,
+    hook,
+    estructura,
+    retentionEstimate,
+    thumbnail,
+    duration,
+    scenes,
+    fullNarration,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Main parser function
+// ---------------------------------------------------------------------------
+function parseViralScoutFile(content, filename) {
+  const header = extractHeader(content);
+
+  // Find the "Ideas de Video" section
+  const ideasSectionMatch = content.match(
+    /## 💡 Ideas de Video[\s\S]+/
+  );
+  if (!ideasSectionMatch) {
+    throw new Error("No '## 💡 Ideas de Video' section found");
+  }
+
+  const ideasSection = ideasSectionMatch[0];
+
+  // Split into individual idea blocks by "### Idea N:"
+  const ideaBlocks = ideasSection
+    .split(/(?=###\s+Idea\s+\d+:)/)
+    .filter((block) => /###\s+Idea\s+\d+:/.test(block));
+
+  if (ideaBlocks.length === 0) {
+    throw new Error("No idea blocks found in ideas section");
+  }
+
+  const ideas = ideaBlocks
+    .map((block, i) => parseIdea(block, i))
+    .filter(Boolean);
+
+  if (ideas.length === 0) {
+    throw new Error("All ideas failed to parse");
+  }
+
+  return {
+    sourceFile: filename,
+    preset: header.preset,
+    keywords: header.keywords,
+    fecha: header.fecha,
+    ideas,
+  };
+}
+
+module.exports = { parseViralScoutFile };
+
+// ---------------------------------------------------------------------------
+// Standalone CLI test: node parser.js <file.md>
+// ---------------------------------------------------------------------------
+if (require.main === module) {
+  const filePath = process.argv[2];
+  if (!filePath) {
+    console.error("Usage: node parser.js <path-to-viralscout.md>");
+    process.exit(1);
+  }
+
+  const content = fs.readFileSync(filePath, "utf-8");
+  const result = parseViralScoutFile(content, require("path").basename(filePath));
+
+  console.log(JSON.stringify(result, null, 2));
+  console.log(`\n✅ Parsed ${result.ideas.length} ideas`);
+  result.ideas.forEach((idea, i) => {
+    console.log(`   Idea ${i + 1}: "${idea.title}" — ${idea.scenes.length} scenes, ${idea.duration}s`);
+  });
+}

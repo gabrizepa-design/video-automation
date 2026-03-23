@@ -1,0 +1,23 @@
+{
+  "name": "video-automation-file-watcher",
+  "version": "1.0.0",
+  "description": "Monitors ViralScout folder for new .md scripts and sends them to n8n",
+  "main": "watcher.js",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "start": "node watcher.js",
+    "dev": "nodemon watcher.js",
+    "test-parser": "node parser.js"
+  },
+  "dependencies": {
+    "axios": "^1.6.8",
+    "chokidar": "^3.6.0",
+    "dotenv": "^16.4.5",
+    "winston": "^3.13.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0"
+  }
+}
