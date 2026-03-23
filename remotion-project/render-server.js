@@ -197,7 +197,7 @@ app.post("/render", async (req, res) => {
 
 // GET /health
 app.get("/health", (_req, res) => {
-  res.json({ status: "ok", service: "remotion-renderer" });
+  res.json({ status: "ok", service: "remotion-renderer", version: "2.0-ffmpeg", hasConvertVideo: typeof convertVideo === "function" });
 });
 
 app.listen(PORT, () => {
