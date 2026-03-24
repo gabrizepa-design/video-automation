@@ -30,7 +30,7 @@ app.post("/upload-audio", express.raw({ type: "*/*", limit: "20mb" }), (req, res
 });
 
 const PORT = parseInt(process.env.REMOTION_PORT || "3001", 10);
-const CONCURRENCY = parseInt(process.env.REMOTION_CONCURRENCY || "2", 10);
+const CONCURRENCY = parseInt(process.env.REMOTION_CONCURRENCY || "1", 10);
 const TEMP_DIR = process.env.TEMP_VIDEOS_DIR || "/tmp/videos";
 const CACHE_DIR = path.join(TEMP_DIR, "cache");
 const CHROME_EXECUTABLE = process.env.REMOTION_CHROME_EXECUTABLE || "/usr/bin/google-chrome-stable";
@@ -279,7 +279,7 @@ app.get("/health", (_req, res) => {
   res.json({
     status: "ok",
     service: "remotion-renderer",
-    version: "6.0-nogaps-audio",
+    version: "6.1-lowmem",
     cachedScenes: cacheFiles.length,
   });
 });
