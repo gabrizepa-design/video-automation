@@ -65,36 +65,29 @@ function downloadFile(url, destPath) {
   });
 }
 
-// Re-mux video to ensure Chromium compatibility (fast, no re-encode)
-function remuxVideo(inputPath, outputPath) {
+// Re-encode video to Chromium-compatible H.264 baseline/yuv420p
+function convertVideo(inputPath, outputPath) {
   const { execSync } = require("child_process");
   try {
-    // First try: just remux (copy streams, fix container)
-    console.log(`[FFMPEG] Remuxing ${path.basename(inputPath)}...`);
-    execSync(`ffmpeg -y -i "${inputPath}" -c copy -movflags +faststart "${outputPath}"`, {
-      timeout: 30000,
-      stdio: "pipe"
-    });
+    // Always re-encode: Runway videos have non-standard MP4 structure
+    // that Chromium can't play even after remux
+    console.log(`[FFMPEG] Re-encoding ${path.basename(inputPath)}...`);
+    const stderr = execSync(
+      `ffmpeg -y -i "${inputPath}" -c:v libx264 -profile:v baseline -level 3.1 -preset fast -crf 23 -pix_fmt yuv420p -an -movflags +faststart "${outputPath}"`,
+      { timeout: 120000, stdio: ["pipe", "pipe", "pipe"] }
+    );
     const stat = fs.statSync(outputPath);
-    if (stat.size > 0) {
-      console.log(`[FFMPEG] Remux OK: ${(stat.size / 1024 / 1024).toFixed(1)}MB`);
-      return outputPath;
+    if (stat.size < 1000) {
+      throw new Error(`Output too small: ${stat.size} bytes`);
     }
-  } catch (err) {
-    console.log(`[FFMPEG] Remux failed, trying re-encode: ${err.message}`);
-  }
-
-  // Fallback: full re-encode
-  try {
-    execSync(`ffmpeg -y -i "${inputPath}" -c:v libx264 -preset fast -crf 23 -pix_fmt yuv420p -c:a aac -movflags +faststart "${outputPath}"`, {
-      timeout: 120000,
-      stdio: "pipe"
-    });
-    const stat = fs.statSync(outputPath);
     console.log(`[FFMPEG] Re-encode OK: ${(stat.size / 1024 / 1024).toFixed(1)}MB`);
     return outputPath;
   } catch (err) {
-    throw new Error(`FFmpeg failed: ${err.message}`);
+    // Log stderr for debugging
+    if (err.stderr) {
+      console.error(`[FFMPEG] stderr: ${err.stderr.toString().slice(-500)}`);
+    }
+    throw new Error(`FFmpeg re-encode failed: ${err.message}`);
   }
 }
 
@@ -139,7 +132,7 @@ async function downloadAssets(config, jobDir) {
       await downloadFile(videoUrl, rawPath);
       const rawStat = fs.statSync(rawPath);
       console.log(`[ASSETS] Scene ${i}: downloaded ${(rawStat.size / 1024 / 1024).toFixed(1)}MB`);
-      remuxVideo(rawPath, convertedPath);
+      convertVideo(rawPath, convertedPath);
       fs.unlinkSync(rawPath);
 
       // Save to cache
@@ -254,9 +247,18 @@ app.get("/health", (_req, res) => {
   res.json({
     status: "ok",
     service: "remotion-renderer",
-    version: "3.0-cache",
+    version: "3.1-reencode",
     cachedScenes: cacheFiles.length,
   });
+});
+
+// DELETE /cache — clear cached scenes
+app.delete("/cache", (_req, res) => {
+  if (fs.existsSync(CACHE_DIR)) {
+    fs.rmSync(CACHE_DIR, { recursive: true, force: true });
+    fs.mkdirSync(CACHE_DIR, { recursive: true });
+  }
+  res.json({ cleared: true });
 });
 
 // GET /cache — list cached scene videos
