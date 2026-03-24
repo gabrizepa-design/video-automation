@@ -95,13 +95,14 @@ services:
       VIRALSCOUT_WATCH_DIR: ${VIRALSCOUT_WATCH_DIR:-/watch}
       N8N_WEBHOOK_URL: ${N8N_WEBHOOK_URL:-http://n8n:5678/webhook/new-script}
       WATCH_POLL_INTERVAL: ${WATCH_POLL_INTERVAL:-5000}
+      TEMP_VIDEOS_DIR: /tmp/videos
       NODE_ENV: ${NODE_ENV:-production}
       TZ: ${TZ:-Europe/Dublin}
     volumes:
       # Montar carpeta de ViralScout (read-only)
       # En VPS: /mnt/c/Users/gabri/Desktop/proyectos vs codes/VIralit:/watch:ro
       # En Linux nativo: ajustar según ruta real
-      - /mnt/c/Users/gabri/Desktop/proyectos vs codes/VIralit:/watch:ro
+      - /mnt/c/Users/gabri/Desktop/proyectos vs codes/VIralit/data/scripts:/watch:ro
       - temp_videos_data:/tmp/videos
 
   # ---------------------------------------------------------------------------

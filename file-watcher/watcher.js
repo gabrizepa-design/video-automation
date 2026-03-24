@@ -24,21 +24,28 @@ const logger = winston.createLogger({
 // ---------------------------------------------------------------------------
 // Config
 // ---------------------------------------------------------------------------
-const WATCH_DIR = process.env.VIRALSCOUT_WATCH_DIR || path.join(__dirname, "..", "..", "VIralit");
+const WATCH_DIR = process.env.VIRALSCOUT_WATCH_DIR || path.join(__dirname, "..", "..", "VIralit", "data", "scripts");
 const WEBHOOK_URL =
   process.env.N8N_WEBHOOK_URL || "https://noctisiops-n8n.gpsefe.easypanel.host/webhook/new-script";
 const POLL_INTERVAL = parseInt(process.env.WATCH_POLL_INTERVAL || "5000", 10);
-const PROCESSED_FILE = path.join(__dirname, "processed_files.json");
+// Store processed list in /tmp/videos (persisted volume) so it survives rebuilds.
+// Falls back to local dir when running outside Docker.
+const PROCESSED_DIR = process.env.TEMP_VIDEOS_DIR || path.join(__dirname);
+const PROCESSED_FILE = path.join(PROCESSED_DIR, "processed_files.json");
 const MAX_RETRIES = 3;
 
 // ---------------------------------------------------------------------------
-// Processed files tracking (persisted to disk)
+// Processed files tracking (persisted to disk, keyed by filename only)
 // ---------------------------------------------------------------------------
 function loadProcessed() {
   try {
     if (fs.existsSync(PROCESSED_FILE)) {
       const data = JSON.parse(fs.readFileSync(PROCESSED_FILE, "utf-8"));
-      return new Set(data);
+      // Migrate: if old entries contain full paths, convert to filenames
+      const names = data.map((entry) =>
+        entry.includes("/") || entry.includes("\\") ? path.basename(entry) : entry
+      );
+      return new Set(names);
     }
   } catch {
     logger.warn("Could not load processed files list, starting fresh");
@@ -48,13 +55,15 @@ function loadProcessed() {
 
 function saveProcessed(set) {
   try {
-    fs.writeFileSync(PROCESSED_FILE, JSON.stringify([...set]), "utf-8");
+    fs.mkdirSync(PROCESSED_DIR, { recursive: true });
+    fs.writeFileSync(PROCESSED_FILE, JSON.stringify([...set], null, 2), "utf-8");
   } catch (err) {
     logger.error(`Failed to persist processed list: ${err.message}`);
   }
 }
 
 const processedFiles = loadProcessed();
+logger.info(`Loaded ${processedFiles.size} previously processed files`);
 
 // ---------------------------------------------------------------------------
 // Send to n8n with retry
@@ -89,12 +98,13 @@ async function sendToN8n(payload, retries = 0) {
 async function handleNewFile(filePath) {
   const filename = path.basename(filePath);
 
-  if (processedFiles.has(filePath)) {
+  if (!filename.endsWith(".md")) return;
+
+  // Track by filename only — immune to path changes
+  if (processedFiles.has(filename)) {
     logger.info(`Skipping already processed: ${filename}`);
     return;
   }
-
-  if (!filename.endsWith(".md")) return;
 
   logger.info(`New file detected: ${filename}`);
 
@@ -125,7 +135,7 @@ async function handleNewFile(filePath) {
 
   const ok = await sendToN8n(parsed);
   if (ok) {
-    processedFiles.add(filePath);
+    processedFiles.add(filename);
     saveProcessed(processedFiles);
   }
 }

@@ -6,13 +6,10 @@ import os
 API_KEY = os.environ["N8N_API_KEY"]
 BASE_URL = os.environ.get("N8N_API_URL", "https://noctisiops-n8n.gpsefe.easypanel.host/api/v1")
 
-# ✅ IDs reales encontrados en n8n
-TELEGRAM_CRED = {"id": "3uQQYkFBx9E4ykyT", "name": "Telegram account"}
-
-# ⚠️ Reemplaza estos con los IDs reales de tu n8n UI
-# Settings → Credentials → busca Google Drive y YouTube
-GOOGLE_DRIVE_CRED = {"id": "REPLACE_WITH_GDRIVE_ID", "name": "Google Drive"}
-YOUTUBE_CRED = {"id": "REPLACE_WITH_YOUTUBE_ID", "name": "YouTube"}
+# ✅ IDs reales de credenciales en n8n (Video Automation)
+TELEGRAM_CRED = {"id": "eBtFrmcPo4xBiP8Y", "name": "Telegram - Video Automation"}
+GOOGLE_DRIVE_CRED = {"id": "BWI2yq65krCDpYV6", "name": "Google Drive - Video Automation"}
+YOUTUBE_CRED = {"id": "5rliZN4BhIee3Nui", "name": "YouTube - Video Automation"}
 
 WORKFLOWS = {
     "video_main_pipeline":        "BtYOMZzqfp3MxSX7",
@@ -60,13 +57,17 @@ for name, wf_id in WORKFLOWS.items():
     original_nodes = len(wf.get("nodes", []))
     wf["nodes"] = fix_credentials(wf.get("nodes", []))
 
+    # Clean settings to only include fields the API accepts
+    allowed_settings = {"executionOrder", "saveManualExecutions", "callerPolicy"}
+    raw_settings = wf.get("settings", {})
+    clean_settings = {k: v for k, v in raw_settings.items() if k in allowed_settings}
+
     # PUT to update
     result = api_call("PUT", f"/workflows/{wf_id}", {
         "name": wf["name"],
         "nodes": wf["nodes"],
         "connections": wf["connections"],
-        "settings": wf.get("settings", {}),
-        "staticData": wf.get("staticData")
+        "settings": clean_settings,
     })
 
     if result:

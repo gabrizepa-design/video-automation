@@ -149,9 +149,62 @@ function parseIdea(ideaBlock, index) {
 }
 
 // ---------------------------------------------------------------------------
+// Parse a standalone script file (just [0-5s] lines, no ViralScout wrapper)
+// ---------------------------------------------------------------------------
+function parseStandaloneScript(content, filename) {
+  const scenes = parseScenes(content);
+
+  if (scenes.length === 0) {
+    throw new Error("No scenes found in standalone script");
+  }
+
+  // Derive title from filename: remove extension, replace underscores
+  const rawTitle = filename
+    .replace(/\.md$/i, "")
+    .replace(/_+/g, " ")
+    .trim();
+
+  // Use first scene narration as hook
+  const hook = scenes[0]?.narration || "";
+  const fullNarration = scenes.map((s) => s.narration).join(" ");
+  const duration = scenes[scenes.length - 1]?.end || 60;
+
+  return {
+    title: rawTitle.length > 100 ? rawTitle.substring(0, 97) + "..." : rawTitle,
+    hook,
+    estructura: "",
+    retentionEstimate: "",
+    thumbnail: "",
+    duration,
+    scenes,
+    fullNarration,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Detect if content is a standalone script (starts with [Ns] pattern)
+// ---------------------------------------------------------------------------
+function isStandaloneScript(content) {
+  const trimmed = content.trim();
+  return /^\[\d+(-\d+)?s\]/.test(trimmed);
+}
+
+// ---------------------------------------------------------------------------
 // Main parser function
 // ---------------------------------------------------------------------------
 function parseViralScoutFile(content, filename) {
+  // Handle standalone scripts (just [0-5s] narration + VISUAL lines)
+  if (isStandaloneScript(content)) {
+    const idea = parseStandaloneScript(content, filename);
+    return {
+      sourceFile: filename,
+      preset: "",
+      keywords: [],
+      fecha: new Date().toISOString(),
+      ideas: [idea],
+    };
+  }
+
   const header = extractHeader(content);
 
   // Find the "Ideas de Video" section

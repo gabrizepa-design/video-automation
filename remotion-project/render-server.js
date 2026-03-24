@@ -61,28 +61,44 @@ function downloadFile(url, destPath) {
   });
 }
 
-// Convert video to Chromium-compatible format using FFmpeg
-function convertVideo(inputPath, outputPath) {
+// Re-mux video to ensure Chromium compatibility (fast, no re-encode)
+function remuxVideo(inputPath, outputPath) {
   const { execSync } = require("child_process");
-  return new Promise((resolve, reject) => {
-    try {
-      console.log(`[FFMPEG] Converting ${path.basename(inputPath)}...`);
-      execSync(`ffmpeg -y -i "${inputPath}" -c:v libx264 -preset fast -crf 23 -c:a aac -movflags +faststart "${outputPath}"`, {
-        timeout: 60000,
-        stdio: "pipe"
-      });
-      resolve(outputPath);
-    } catch (err) {
-      reject(new Error(`FFmpeg conversion failed: ${err.message}`));
+  try {
+    // First try: just remux (copy streams, fix container)
+    console.log(`[FFMPEG] Remuxing ${path.basename(inputPath)}...`);
+    execSync(`ffmpeg -y -i "${inputPath}" -c copy -movflags +faststart "${outputPath}"`, {
+      timeout: 30000,
+      stdio: "pipe"
+    });
+    const stat = fs.statSync(outputPath);
+    if (stat.size > 0) {
+      console.log(`[FFMPEG] Remux OK: ${(stat.size / 1024 / 1024).toFixed(1)}MB`);
+      return outputPath;
     }
-  });
+  } catch (err) {
+    console.log(`[FFMPEG] Remux failed, trying re-encode: ${err.message}`);
+  }
+
+  // Fallback: full re-encode
+  try {
+    execSync(`ffmpeg -y -i "${inputPath}" -c:v libx264 -preset fast -crf 23 -pix_fmt yuv420p -c:a aac -movflags +faststart "${outputPath}"`, {
+      timeout: 120000,
+      stdio: "pipe"
+    });
+    const stat = fs.statSync(outputPath);
+    console.log(`[FFMPEG] Re-encode OK: ${(stat.size / 1024 / 1024).toFixed(1)}MB`);
+    return outputPath;
+  } catch (err) {
+    throw new Error(`FFmpeg failed: ${err.message}`);
+  }
 }
 
 // Download all assets (scene videos + audio) to local temp files
 async function downloadAssets(config, jobDir) {
   console.log(`[ASSETS] Downloading to ${jobDir}...`);
 
-  // Download scene videos and convert to Chromium-compatible format
+  // Download scene videos and remux for Chromium compatibility
   for (let i = 0; i < config.scenes.length; i++) {
     const scene = config.scenes[i];
     const videoUrl = scene.videoPath;
@@ -91,8 +107,10 @@ async function downloadAssets(config, jobDir) {
       const convertedPath = path.join(jobDir, `scene_${i}.mp4`);
       console.log(`[ASSETS] Scene ${i}: downloading...`);
       await downloadFile(videoUrl, rawPath);
-      await convertVideo(rawPath, convertedPath);
-      fs.unlinkSync(rawPath); // Remove raw file
+      const rawStat = fs.statSync(rawPath);
+      console.log(`[ASSETS] Scene ${i}: downloaded ${(rawStat.size / 1024 / 1024).toFixed(1)}MB`);
+      remuxVideo(rawPath, convertedPath);
+      fs.unlinkSync(rawPath);
       scene.videoPath = convertedPath;
       console.log(`[ASSETS] Scene ${i}: ready at ${convertedPath}`);
     }
