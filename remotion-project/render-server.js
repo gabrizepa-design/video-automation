@@ -19,7 +19,11 @@ app.use(express.json({ limit: "50mb" }));
 const PORT = parseInt(process.env.REMOTION_PORT || "3001", 10);
 const CONCURRENCY = parseInt(process.env.REMOTION_CONCURRENCY || "2", 10);
 const TEMP_DIR = process.env.TEMP_VIDEOS_DIR || "/tmp/videos";
+const CACHE_DIR = path.join(TEMP_DIR, "cache");
 const CHROME_EXECUTABLE = process.env.REMOTION_CHROME_EXECUTABLE || "/usr/bin/chromium";
+
+// Ensure cache dir exists
+fs.mkdirSync(CACHE_DIR, { recursive: true });
 
 let bundledPath = null;
 
@@ -98,11 +102,37 @@ function remuxVideo(inputPath, outputPath) {
 async function downloadAssets(config, jobDir) {
   console.log(`[ASSETS] Downloading to ${jobDir}...`);
 
-  // Download scene videos and remux for Chromium compatibility
+  // Download scene videos, cache them, and remux for Chromium compatibility
   for (let i = 0; i < config.scenes.length; i++) {
     const scene = config.scenes[i];
     const videoUrl = scene.videoPath;
+
+    // If already a local path (cached), just verify it exists
+    if (videoUrl && !videoUrl.startsWith("http")) {
+      if (fs.existsSync(videoUrl)) {
+        console.log(`[ASSETS] Scene ${i}: using local file ${videoUrl}`);
+        continue;
+      }
+      console.log(`[ASSETS] Scene ${i}: local file not found: ${videoUrl}`);
+      continue;
+    }
+
     if (videoUrl && (videoUrl.startsWith("http://") || videoUrl.startsWith("https://"))) {
+      // Extract unique ID from URL for cache key (e.g. UUID from cloudfront URL)
+      const urlMatch = videoUrl.match(/([a-f0-9-]{36})\.mp4/);
+      const cacheKey = urlMatch ? urlMatch[1] : `scene_${Date.now()}_${i}`;
+      const cachedPath = path.join(CACHE_DIR, `${cacheKey}.mp4`);
+
+      // Check cache first
+      if (fs.existsSync(cachedPath)) {
+        const stat = fs.statSync(cachedPath);
+        if (stat.size > 10000) {
+          console.log(`[CACHE HIT] Scene ${i}: ${cacheKey} (${(stat.size / 1024 / 1024).toFixed(1)}MB)`);
+          scene.videoPath = cachedPath;
+          continue;
+        }
+      }
+
       const rawPath = path.join(jobDir, `scene_${i}_raw.mp4`);
       const convertedPath = path.join(jobDir, `scene_${i}.mp4`);
       console.log(`[ASSETS] Scene ${i}: downloading...`);
@@ -111,6 +141,11 @@ async function downloadAssets(config, jobDir) {
       console.log(`[ASSETS] Scene ${i}: downloaded ${(rawStat.size / 1024 / 1024).toFixed(1)}MB`);
       remuxVideo(rawPath, convertedPath);
       fs.unlinkSync(rawPath);
+
+      // Save to cache
+      fs.copyFileSync(convertedPath, cachedPath);
+      console.log(`[CACHE SAVE] Scene ${i}: ${cacheKey}`);
+
       scene.videoPath = convertedPath;
       console.log(`[ASSETS] Scene ${i}: ready at ${convertedPath}`);
     }
@@ -207,15 +242,32 @@ app.post("/render", async (req, res) => {
 
   } catch (err) {
     console.error(`[RENDER] Job ${jobId} Error: ${err.message}`);
-    // Cleanup on error too
-    fs.rmSync(jobDir, { recursive: true, force: true });
+    // Cleanup job dir on error but keep cache intact for retry
+    try { fs.rmSync(jobDir, { recursive: true, force: true }); } catch (_) {}
     res.status(500).json({ error: err.message });
   }
 });
 
 // GET /health
 app.get("/health", (_req, res) => {
-  res.json({ status: "ok", service: "remotion-renderer", version: "2.0-ffmpeg", hasConvertVideo: typeof convertVideo === "function" });
+  const cacheFiles = fs.existsSync(CACHE_DIR) ? fs.readdirSync(CACHE_DIR).filter(f => f.endsWith(".mp4")) : [];
+  res.json({
+    status: "ok",
+    service: "remotion-renderer",
+    version: "3.0-cache",
+    cachedScenes: cacheFiles.length,
+  });
+});
+
+// GET /cache — list cached scene videos
+app.get("/cache", (_req, res) => {
+  if (!fs.existsSync(CACHE_DIR)) return res.json({ scenes: [] });
+  const files = fs.readdirSync(CACHE_DIR).filter(f => f.endsWith(".mp4"));
+  const scenes = files.map(f => {
+    const stat = fs.statSync(path.join(CACHE_DIR, f));
+    return { file: f, sizeMB: (stat.size / 1024 / 1024).toFixed(1), cached: stat.mtime.toISOString() };
+  });
+  res.json({ scenes, cacheDir: CACHE_DIR });
 });
 
 app.listen(PORT, () => {
