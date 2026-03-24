@@ -15,6 +15,8 @@ const { renderMedia, selectComposition } = require("@remotion/renderer");
 
 const app = express();
 app.use(express.json({ limit: "50mb" }));
+// Serve temp video files so Remotion's OffthreadVideo can access them
+app.use("/assets", express.static("/tmp/videos"));
 
 const PORT = parseInt(process.env.REMOTION_PORT || "3001", 10);
 const CONCURRENCY = parseInt(process.env.REMOTION_CONCURRENCY || "2", 10);
@@ -121,7 +123,7 @@ async function downloadAssets(config, jobDir) {
         const stat = fs.statSync(cachedPath);
         if (stat.size > 10000) {
           console.log(`[CACHE HIT] Scene ${i}: ${cacheKey} (${(stat.size / 1024 / 1024).toFixed(1)}MB)`);
-          scene.videoPath = cachedPath;
+          scene.videoPath = `http://localhost:${PORT}/assets/cache/${cacheKey}.mp4`;
           continue;
         }
       }
@@ -139,8 +141,9 @@ async function downloadAssets(config, jobDir) {
       fs.copyFileSync(convertedPath, cachedPath);
       console.log(`[CACHE SAVE] Scene ${i}: ${cacheKey}`);
 
-      scene.videoPath = convertedPath;
-      console.log(`[ASSETS] Scene ${i}: ready at ${convertedPath}`);
+      // Serve via express static so Remotion can access it
+      scene.videoPath = `http://localhost:${PORT}/assets/${jobId}/scene_${i}.mp4`;
+      console.log(`[ASSETS] Scene ${i}: ready at ${scene.videoPath}`);
     }
   }
 
@@ -149,8 +152,9 @@ async function downloadAssets(config, jobDir) {
     const audioPath = path.join(jobDir, "audio.mp3");
     console.log("[ASSETS] Audio: downloading...");
     await downloadFile(config.audioUrl, audioPath);
-    config.audioPath = audioPath;
-    console.log(`[ASSETS] Audio: saved to ${audioPath}`);
+    config.audioUrl = `http://localhost:${PORT}/assets/${jobId}/audio.mp3`;
+    config.audioPath = config.audioUrl;
+    console.log(`[ASSETS] Audio: ready at ${config.audioUrl}`);
   }
 
   return config;
@@ -247,7 +251,7 @@ app.get("/health", (_req, res) => {
   res.json({
     status: "ok",
     service: "remotion-renderer",
-    version: "4.1-offthread",
+    version: "4.2-serve-assets",
     cachedScenes: cacheFiles.length,
   });
 });
