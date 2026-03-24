@@ -20,7 +20,7 @@ const PORT = parseInt(process.env.REMOTION_PORT || "3001", 10);
 const CONCURRENCY = parseInt(process.env.REMOTION_CONCURRENCY || "2", 10);
 const TEMP_DIR = process.env.TEMP_VIDEOS_DIR || "/tmp/videos";
 const CACHE_DIR = path.join(TEMP_DIR, "cache");
-const CHROME_EXECUTABLE = process.env.REMOTION_CHROME_EXECUTABLE || "/usr/bin/chromium";
+const CHROME_EXECUTABLE = process.env.REMOTION_CHROME_EXECUTABLE || "/usr/bin/google-chrome-stable";
 
 // Ensure cache dir exists
 fs.mkdirSync(CACHE_DIR, { recursive: true });
@@ -247,7 +247,7 @@ app.get("/health", (_req, res) => {
   res.json({
     status: "ok",
     service: "remotion-renderer",
-    version: "3.1-reencode",
+    version: "4.0-chrome",
     cachedScenes: cacheFiles.length,
   });
 });
