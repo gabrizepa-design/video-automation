@@ -1,5 +1,5 @@
 import React from "react";
-import { AbsoluteFill, Video, useCurrentFrame, useVideoConfig } from "remotion";
+import { AbsoluteFill, OffthreadVideo, useCurrentFrame, useVideoConfig } from "remotion";
 import { TransitionOverlay } from "./Transition";
 import type { SceneData } from "./types";
 
@@ -30,7 +30,7 @@ export const SceneComponent: React.FC<SceneProps> = ({ scene, nextScene, fps }) 
   return (
     <AbsoluteFill>
       {/* Scene video — covers full 1080x1920 frame */}
-      <Video
+      <OffthreadVideo
         src={scene.videoPath}
         style={{
           width: "100%",

@@ -247,7 +247,7 @@ app.get("/health", (_req, res) => {
   res.json({
     status: "ok",
     service: "remotion-renderer",
-    version: "4.0-chrome",
+    version: "4.1-offthread",
     cachedScenes: cacheFiles.length,
   });
 });
