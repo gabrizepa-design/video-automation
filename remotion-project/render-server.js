@@ -94,7 +94,7 @@ function convertVideo(inputPath, outputPath) {
 }
 
 // Download all assets (scene videos + audio) to local temp files
-async function downloadAssets(config, jobDir) {
+async function downloadAssets(config, jobDir, jobId) {
   console.log(`[ASSETS] Downloading to ${jobDir}...`);
 
   // Download scene videos, cache them, and remux for Chromium compatibility
@@ -181,7 +181,7 @@ app.post("/render", async (req, res) => {
 
   try {
     // Download all remote assets
-    await downloadAssets(config, jobDir);
+    await downloadAssets(config, jobDir, jobId);
 
     const bundlePath = await getBundle();
 
@@ -251,7 +251,7 @@ app.get("/health", (_req, res) => {
   res.json({
     status: "ok",
     service: "remotion-renderer",
-    version: "4.2-serve-assets",
+    version: "4.3-fix-jobid",
     cachedScenes: cacheFiles.length,
   });
 });
