@@ -196,10 +196,27 @@ app.post("/render", async (req, res) => {
 
     const bundlePath = await getBundle();
 
-    // Calculate total duration from scenes
-    const totalDuration = config.scenes.reduce((max, s) => Math.max(max, s.end || 0), 0);
+    // Calculate total duration: use audio duration if available, otherwise scenes
+    const sceneDuration = config.scenes.reduce((max, s) => Math.max(max, s.end || 0), 0);
+    // If we have audio, probe its duration with ffmpeg
+    let audioDuration = 0;
+    if (config.audioPath || config.audioUrl) {
+      const audioFile = config.audioPath && config.audioPath.startsWith("http://localhost")
+        ? config.audioPath.replace(`http://localhost:${PORT}/assets/`, TEMP_DIR + "/")
+        : null;
+      if (audioFile && fs.existsSync(audioFile)) {
+        try {
+          const { execSync } = require("child_process");
+          const probe = execSync(`ffprobe -v quiet -show_entries format=duration -of csv=p=0 "${audioFile}"`, { timeout: 5000 }).toString().trim();
+          audioDuration = parseFloat(probe) || 0;
+          console.log(`[RENDER] Audio duration: ${audioDuration.toFixed(1)}s`);
+        } catch (e) { /* ignore probe errors */ }
+      }
+    }
+    const totalDuration = audioDuration > sceneDuration ? audioDuration : sceneDuration;
     const fps = config.fps || 30;
     const totalFrames = Math.round(totalDuration * fps);
+    console.log(`[RENDER] Total duration: ${totalDuration.toFixed(1)}s (audio: ${audioDuration.toFixed(1)}s, scenes: ${sceneDuration.toFixed(1)}s)`);
 
     const composition = await selectComposition({
       serveUrl: bundlePath,
@@ -262,7 +279,7 @@ app.get("/health", (_req, res) => {
   res.json({
     status: "ok",
     service: "remotion-renderer",
-    version: "5.0-audio-subs",
+    version: "6.0-nogaps-audio",
     cachedScenes: cacheFiles.length,
   });
 });
