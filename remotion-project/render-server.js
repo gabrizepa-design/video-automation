@@ -18,6 +18,17 @@ app.use(express.json({ limit: "50mb" }));
 // Serve temp video files so Remotion's OffthreadVideo can access them
 app.use("/assets", express.static("/tmp/videos"));
 
+// POST /upload-audio — accept raw audio binary, save to cache, return URL
+app.post("/upload-audio", express.raw({ type: "*/*", limit: "20mb" }), (req, res) => {
+  const audioId = `audio_${Date.now()}`;
+  const audioPath = path.join(CACHE_DIR, `${audioId}.mp3`);
+  fs.mkdirSync(CACHE_DIR, { recursive: true });
+  fs.writeFileSync(audioPath, req.body);
+  const url = `http://localhost:${PORT}/assets/cache/${audioId}.mp3`;
+  console.log(`[AUDIO] Saved ${(req.body.length / 1024).toFixed(0)}KB -> ${url}`);
+  res.json({ url, audioId, size: req.body.length });
+});
+
 const PORT = parseInt(process.env.REMOTION_PORT || "3001", 10);
 const CONCURRENCY = parseInt(process.env.REMOTION_CONCURRENCY || "2", 10);
 const TEMP_DIR = process.env.TEMP_VIDEOS_DIR || "/tmp/videos";

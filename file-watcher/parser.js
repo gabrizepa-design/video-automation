@@ -47,9 +47,10 @@ function extractHeader(content) {
 // ---------------------------------------------------------------------------
 function parseScenes(scriptContent) {
   const scenes = [];
-  // Match patterns like [0-5s] or [0s] narration\nVISUAL: description
+  // Match patterns like [0-5s], **[0-5s]**, **[0-5s]**\n etc.
+  // Strips optional markdown bold markers around timestamps
   const sceneRegex =
-    /\[(\d+)(?:-(\d+))?s\]\s*([\s\S]+?)(?=\n\[|\n```|$)/g;
+    /\*{0,2}\[(\d+)(?:-(\d+))?s\]\*{0,2}\s*([\s\S]+?)(?=\n\*{0,2}\[|\n```|$)/g;
 
   let match;
   while ((match = sceneRegex.exec(scriptContent)) !== null) {
@@ -57,8 +58,8 @@ function parseScenes(scriptContent) {
     const end = match[2] ? parseInt(match[2], 10) : start + 5;
     const block = match[3].trim();
 
-    // Split narration from VISUAL line
-    const visualMatch = block.match(/^([\s\S]+?)\nVISUAL:\s*(.+?)$/m);
+    // Split narration from VISUAL line (supports VISUAL: and **VISUAL:**)
+    const visualMatch = block.match(/^([\s\S]+?)\n\*{0,2}VISUAL:\*{0,2}\s*(.+?)$/m);
     let narration = block;
     let visual = "";
 
@@ -67,13 +68,15 @@ function parseScenes(scriptContent) {
       visual = visualMatch[2].trim();
     } else {
       // VISUAL might be missing — use narration as visual description fallback
-      narration = block.replace(/VISUAL:.*$/m, "").trim();
-      const visualLine = block.match(/VISUAL:\s*(.+)/)?.[1]?.trim();
+      narration = block.replace(/\*{0,2}VISUAL:\*{0,2}.*$/m, "").trim();
+      const visualLine = block.match(/\*{0,2}VISUAL:\*{0,2}\s*(.+)/)?.[1]?.trim();
       visual = visualLine || "";
     }
 
-    // Clean narration: remove any remaining VISUAL lines
-    narration = narration.replace(/VISUAL:.*$/gm, "").trim();
+    // Clean narration: remove any remaining VISUAL lines, markdown separators, title
+    narration = narration.replace(/\*{0,2}VISUAL:\*{0,2}.*$/gm, "").trim();
+    narration = narration.replace(/^---$/gm, "").trim();
+    narration = narration.replace(/^#\s+.+$/gm, "").trim();
 
     if (narration) {
       scenes.push({
@@ -186,7 +189,8 @@ function parseStandaloneScript(content, filename) {
 // ---------------------------------------------------------------------------
 function isStandaloneScript(content) {
   const trimmed = content.trim();
-  return /^\[\d+(-\d+)?s\]/.test(trimmed);
+  // Matches: [0-5s], **[0-5s]**, or content that has these patterns somewhere
+  return /^\[\d+(-\d+)?s\]/.test(trimmed) || /\*{2}\[\d+(-\d+)?s\]\*{2}/.test(trimmed);
 }
 
 // ---------------------------------------------------------------------------
