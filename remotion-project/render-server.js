@@ -251,7 +251,7 @@ app.get("/health", (_req, res) => {
   res.json({
     status: "ok",
     service: "remotion-renderer",
-    version: "4.3-fix-jobid",
+    version: "5.0-audio-subs",
     cachedScenes: cacheFiles.length,
   });
 });
