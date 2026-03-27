@@ -22,6 +22,7 @@ export interface VideoConfig {
   audioPath?: string;           // Local path to audio (legacy)
   subtitles: SubtitleWord[];
   outputPath: string;
+  totalVideoDuration?: number;  // Total video length in seconds
   fps?: number;                 // Default: 30
   width?: number;               // Default: 1080
   height?: number;              // Default: 1920

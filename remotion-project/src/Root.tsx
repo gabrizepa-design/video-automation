@@ -25,6 +25,10 @@ export const RemotionRoot: React.FC = () => {
       width={1080}
       height={1920}
       defaultProps={defaultConfig}
+      calculateMetadata={({ props }) => {
+        const dur = props.totalVideoDuration || 60;
+        return { durationInFrames: Math.round(dur * 30) };
+      }}
     />
   );
 };

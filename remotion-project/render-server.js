@@ -213,10 +213,12 @@ app.post("/render", async (req, res) => {
         } catch (e) { /* ignore probe errors */ }
       }
     }
-    const totalDuration = audioDuration > sceneDuration ? audioDuration : sceneDuration;
+    // Priority: use totalVideoDuration from config (calculated from actual clip durations),
+    // fall back to max of audio/scene duration, never exceed scene duration
+    const totalDuration = config.totalVideoDuration || Math.max(audioDuration, sceneDuration) || 60;
     const fps = config.fps || 30;
     const totalFrames = Math.round(totalDuration * fps);
-    console.log(`[RENDER] Total duration: ${totalDuration.toFixed(1)}s (audio: ${audioDuration.toFixed(1)}s, scenes: ${sceneDuration.toFixed(1)}s)`);
+    console.log(`[RENDER] Total duration: ${totalDuration.toFixed(1)}s (config: ${config.totalVideoDuration || 'none'}, audio: ${audioDuration.toFixed(1)}s, scenes: ${sceneDuration.toFixed(1)}s)`);
 
     const composition = await selectComposition({
       serveUrl: bundlePath,
