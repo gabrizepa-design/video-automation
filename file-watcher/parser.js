@@ -65,7 +65,7 @@ function parseScenes(scriptContent) {
 
     if (visualMatch) {
       narration = visualMatch[1].trim();
-      visual = visualMatch[2].replace(/\*{1,2}/g, "").trim();
+      visual = visualMatch[2].replace(/\*{1,2}/g, "").replace(/`/g, "").trim();
     } else {
       // VISUAL might be missing — use narration as visual description fallback
       narration = block.replace(/\*{0,2}VISUAL:\*{0,2}.*$/m, "").trim();
@@ -168,7 +168,7 @@ function parseStandaloneScript(content, filename) {
   }
 
   // Try to extract title from "# GUION: Title" header
-  const guionTitle = content.match(/^#\s+(?:GUION|GUIÓN):\s*(.+)/im)?.[1]?.trim();
+  const guionTitle = content.match(/^#\s+(?:🎬\s+)?(?:GUION|GUIÓN):\s*(.+)/im)?.[1]?.trim();
 
   // Fallback: derive title from filename
   const rawTitle = guionTitle || filename
@@ -206,8 +206,8 @@ function isStandaloneScript(content) {
   if (/^\[\d+(-\d+)?s\]/.test(trimmed) || /^\*{2}\[\d+(-\d+)?s\]/.test(trimmed)) {
     return true;
   }
-  // "# GUION:" header format — has timestamps inside but starts with title
-  if (/^#\s+(GUION|GUIÓN)/i.test(trimmed) && /\*{0,2}\[\d+(-\d+)?s\]/.test(content)) {
+  // "# GUION:" or "# 🎬 GUION:" header format — has timestamps inside but starts with title
+  if (/^#\s+(?:🎬\s+)?(?:GUION|GUIÓN)/i.test(trimmed) && /\*{0,2}\[\d+(-\d+)?s\]/.test(content)) {
     return true;
   }
   return false;
