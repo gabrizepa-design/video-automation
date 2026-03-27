@@ -35,7 +35,7 @@ export const VideoComposition: React.FC<VideoConfig> = (config) => {
       })}
 
       {audioSrc && <Audio src={audioSrc} />}
-      {bgMusicSrc && <Audio src={bgMusicSrc} volume={0.12} loop />}
+      {bgMusicSrc && <Audio src={bgMusicSrc} volume={0.06} loop />}
 
       {subtitles && subtitles.length > 0 && (
         <SubtitlesOverlay subtitles={subtitles} />
