@@ -21,6 +21,8 @@ export interface VideoConfig {
   scenes: SceneData[];
   audioUrl?: string;            // URL to audio file
   audioPath?: string;           // Local path to audio (legacy)
+  bgMusicUrl?: string;          // Background music URL
+  bgMusicPath?: string;         // Background music local path
   subtitles: SubtitleWord[];
   outputPath: string;
   totalVideoDuration?: number;  // Total video length in seconds

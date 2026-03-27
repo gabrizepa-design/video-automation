@@ -168,6 +168,16 @@ async function downloadAssets(config, jobDir, jobId) {
     console.log(`[ASSETS] Audio: ready at ${config.audioUrl}`);
   }
 
+  // Download background music
+  if (config.bgMusicUrl && (config.bgMusicUrl.startsWith("http://") || config.bgMusicUrl.startsWith("https://"))) {
+    const bgPath = path.join(jobDir, "bgmusic.mp3");
+    console.log("[ASSETS] BG Music: downloading...");
+    await downloadFile(config.bgMusicUrl, bgPath);
+    config.bgMusicUrl = `http://localhost:${PORT}/assets/${jobId}/bgmusic.mp3`;
+    config.bgMusicPath = config.bgMusicUrl;
+    console.log(`[ASSETS] BG Music: ready at ${config.bgMusicUrl}`);
+  }
+
   return config;
 }
 

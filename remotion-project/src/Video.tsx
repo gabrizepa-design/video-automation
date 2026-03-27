@@ -6,9 +6,10 @@ import type { VideoConfig } from "./types";
 
 export const VideoComposition: React.FC<VideoConfig> = (config) => {
   const { fps } = useVideoConfig();
-  const { scenes, audioPath, audioUrl, subtitles } = config;
+  const { scenes, audioPath, audioUrl, bgMusicPath, bgMusicUrl, subtitles } = config;
 
   const audioSrc = audioPath || audioUrl || "";
+  const bgMusicSrc = bgMusicPath || bgMusicUrl || "";
 
   return (
     <AbsoluteFill style={{ backgroundColor: "#000" }}>
@@ -34,6 +35,7 @@ export const VideoComposition: React.FC<VideoConfig> = (config) => {
       })}
 
       {audioSrc && <Audio src={audioSrc} />}
+      {bgMusicSrc && <Audio src={bgMusicSrc} volume={0.12} loop />}
 
       {subtitles && subtitles.length > 0 && (
         <SubtitlesOverlay subtitles={subtitles} />
