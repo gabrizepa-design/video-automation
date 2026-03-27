@@ -65,7 +65,7 @@ function parseScenes(scriptContent) {
 
     if (visualMatch) {
       narration = visualMatch[1].trim();
-      visual = visualMatch[2].trim();
+      visual = visualMatch[2].replace(/\*{1,2}/g, "").trim();
     } else {
       // VISUAL might be missing — use narration as visual description fallback
       narration = block.replace(/\*{0,2}VISUAL:\*{0,2}.*$/m, "").trim();
@@ -73,10 +73,14 @@ function parseScenes(scriptContent) {
       visual = visualLine || "";
     }
 
-    // Clean narration: remove any remaining VISUAL lines, markdown separators, title
+    // Clean narration: remove VISUAL lines, markdown separators, title, section labels
     narration = narration.replace(/\*{0,2}VISUAL:\*{0,2}.*$/gm, "").trim();
     narration = narration.replace(/^---$/gm, "").trim();
     narration = narration.replace(/^#\s+.+$/gm, "").trim();
+    // Remove section labels: HOOK:, DESARROLLO N:, CLÍMAX:, CLIMAX:, LOOP:, CIERRE:
+    narration = narration.replace(/^(?:HOOK|DESARROLLO\s*\d*|CL[IÍ]MAX|LOOP|CIERRE)\s*:\s*/im, "").trim();
+    // Strip any remaining markdown bold/italic markers
+    narration = narration.replace(/\*{1,2}/g, "").trim();
 
     if (narration) {
       scenes.push({
@@ -155,17 +159,25 @@ function parseIdea(ideaBlock, index) {
 // Parse a standalone script file (just [0-5s] lines, no ViralScout wrapper)
 // ---------------------------------------------------------------------------
 function parseStandaloneScript(content, filename) {
-  const scenes = parseScenes(content);
+  // Strip verification/metadata section at the end (## ✅ VERIFICACIÓN, ## VERIFICACIÓN, etc.)
+  const cleanContent = content.replace(/\n##\s+.*VERIFICACI[OÓ]N[\s\S]*$/i, "");
+  const scenes = parseScenes(cleanContent);
 
   if (scenes.length === 0) {
     throw new Error("No scenes found in standalone script");
   }
 
-  // Derive title from filename: remove extension, replace underscores
-  const rawTitle = filename
+  // Try to extract title from "# GUION: Title" header
+  const guionTitle = content.match(/^#\s+(?:GUION|GUIÓN):\s*(.+)/im)?.[1]?.trim();
+
+  // Fallback: derive title from filename
+  const rawTitle = guionTitle || filename
     .replace(/\.md$/i, "")
     .replace(/_+/g, " ")
     .trim();
+
+  // Try to extract tone from content (e.g. keywords in filename or content)
+  const toneMatch = content.match(/\*{0,2}Tono?:\*{0,2}\s*(.+)/i)?.[1]?.trim() || "";
 
   // Use first scene narration as hook
   const hook = scenes[0]?.narration || "";
@@ -175,6 +187,7 @@ function parseStandaloneScript(content, filename) {
   return {
     title: rawTitle.length > 100 ? rawTitle.substring(0, 97) + "..." : rawTitle,
     hook,
+    tone: toneMatch,
     estructura: "",
     retentionEstimate: "",
     thumbnail: "",
@@ -185,12 +198,19 @@ function parseStandaloneScript(content, filename) {
 }
 
 // ---------------------------------------------------------------------------
-// Detect if content is a standalone script (starts with [Ns] pattern)
+// Detect if content is a standalone script (has [Ns] timestamp patterns)
 // ---------------------------------------------------------------------------
 function isStandaloneScript(content) {
   const trimmed = content.trim();
-  // Matches: [0-5s], **[0-5s]**, or content that has these patterns somewhere
-  return /^\[\d+(-\d+)?s\]/.test(trimmed) || /\*{2}\[\d+(-\d+)?s\]\*{2}/.test(trimmed);
+  // Direct start: [0-5s] or **[0-5s]**
+  if (/^\[\d+(-\d+)?s\]/.test(trimmed) || /^\*{2}\[\d+(-\d+)?s\]/.test(trimmed)) {
+    return true;
+  }
+  // "# GUION:" header format — has timestamps inside but starts with title
+  if (/^#\s+(GUION|GUIÓN)/i.test(trimmed) && /\*{0,2}\[\d+(-\d+)?s\]/.test(content)) {
+    return true;
+  }
+  return false;
 }
 
 // ---------------------------------------------------------------------------
