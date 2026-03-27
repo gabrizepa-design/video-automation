@@ -7,6 +7,7 @@ export interface SceneData {
   narration: string;
   visual: string;
   transition?: "fade" | "dissolve" | "wipe" | "cut";
+  loopVideo?: boolean; // Loop source video if scene duration > clip length
 }
 
 export interface SubtitleWord {

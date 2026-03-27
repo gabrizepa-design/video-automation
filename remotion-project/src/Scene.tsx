@@ -32,6 +32,7 @@ export const SceneComponent: React.FC<SceneProps> = ({ scene, nextScene, fps }) 
       {/* Scene video — covers full 1080x1920 frame */}
       <OffthreadVideo
         src={scene.videoPath}
+        loop={scene.loopVideo ?? false}
         style={{
           width: "100%",
           height: "100%",
